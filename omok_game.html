@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>오목 게임</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:linear-gradient(135deg,#172033,#0d111a);font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#fff;display:flex;justify-content:center;align-items:center;padding:20px}
+.app{width:min(760px,100%);text-align:center}
+h1{margin:0 0 6px;font-size:34px}
+.sub{color:#aeb9cc;margin-bottom:18px}
+.panel{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-bottom:16px}
+button,select{border:0;border-radius:10px;padding:11px 16px;font-size:15px;font-weight:700;cursor:pointer;background:#263249;color:white}
+button:hover{filter:brightness(1.15)}
+button.active{background:#e5a83a;color:#18120a}
+.status{background:#202a3d;border:1px solid #33405a;border-radius:12px;padding:12px;margin-bottom:15px;font-weight:700}
+.board-wrap{display:flex;justify-content:center}
+#board{width:min(92vw,660px);height:min(92vw,660px);background:#d9a64e;border:8px solid #9b6828;border-radius:8px;box-shadow:0 18px 45px #0008;touch-action:none;cursor:pointer}
+.info{margin-top:15px;color:#aeb9cc;font-size:14px}
+</style>
+</head>
+<body>
+<div class="app">
+  <h1>⚫ 오목 ⚪</h1>
+  <div class="sub">15 × 15 오목 · 5개를 먼저 연결하세요</div>
+  <div class="panel">
+    <button id="pvp" class="active">2인 대전</button>
+    <button id="ai">AI 대전</button>
+    <select id="level" disabled>
+      <option value="1">AI 쉬움</option>
+      <option value="2" selected>AI 보통</option>
+      <option value="3">AI 어려움</option>
+    </select>
+    <button id="undo">↩ 무르기</button>
+    <button id="restart">⟳ 새 게임</button>
+  </div>
+  <div id="status" class="status">흑돌 차례입니다.</div>
+  <div class="board-wrap"><canvas id="board"></canvas></div>
+  <div class="info">흑돌이 선공입니다 · 금수(렌주 규칙)는 적용하지 않습니다</div>
+</div>
+<script>
+const N=15, canvas=document.getElementById('board'), ctx=canvas.getContext('2d');
+let board=[], turn=1, gameOver=false, history=[], mode='pvp', aiLevel=2;
+
+function init(){
+  board=Array.from({length:N},()=>Array(N).fill(0));
+  turn=1; gameOver=false; history=[];
+  status("흑돌 차례입니다.");
+  resize(); draw();
+}
+function resize(){
+  const s=Math.min(660,Math.floor(window.innerWidth*.92));
+  canvas.width=s*devicePixelRatio; canvas.height=s*devicePixelRatio;
+  canvas.style.width=s+'px'; canvas.style.height=s+'px';
+  ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);
+  draw();
+}
+function status(t){document.getElementById('status').textContent=t}
+function draw(){
+  const s=parseFloat(canvas.style.width)||660, pad=s*.045, cell=(s-pad*2)/(N-1);
+  ctx.clearRect(0,0,s,s);
+  ctx.fillStyle='#d9a64e';ctx.fillRect(0,0,s,s);
+  ctx.strokeStyle='#62441d';ctx.lineWidth=1;
+  for(let i=0;i<N;i++){
+    const p=pad+i*cell;
+    ctx.beginPath();ctx.moveTo(p,pad);ctx.lineTo(p,s-pad);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(pad,p);ctx.lineTo(s-pad,p);ctx.stroke();
+  }
+  // star points
+  ctx.fillStyle='#503515';
+  [3,7,11].forEach(x=>[3,7,11].forEach(y=>{ctx.beginPath();ctx.arc(pad+x*cell,pad+y*cell,4,0,Math.PI*2);ctx.fill()}));
+  for(let y=0;y<N;y++)for(let x=0;x<N;x++)if(board[y][x]){
+    const px=pad+x*cell,py=pad+y*cell,r=cell*.43;
+    const g=ctx.createRadialGradient(px-r*.35,py-r*.35,r*.05,px,py,r);
+    if(board[y][x]===1){g.addColorStop(0,'#555');g.addColorStop(.35,'#161616');g.addColorStop(1,'#000')}
+    else{g.addColorStop(0,'#fff');g.addColorStop(.65,'#eee');g.addColorStop(1,'#aaa')}
+    ctx.beginPath();ctx.arc(px,py,r,0,Math.PI*2);ctx.fillStyle=g;ctx.fill();
+    ctx.strokeStyle=board[y][x]===1?'#000':'#888';ctx.stroke();
+  }
+}
+function pos(e){
+  const r=canvas.getBoundingClientRect(),s=r.width,pad=s*.045,cell=(s-pad*2)/(N-1);
+  return [Math.round((e.clientX-r.left-pad)/cell),Math.round((e.clientY-r.top-pad)/cell)];
+}
+function valid(x,y){return x>=0&&x<N&&y>=0&&y<N}
+function win(x,y,p){
+  const dirs=[[1,0],[0,1],[1,1],[1,-1]];
+  for(const [dx,dy] of dirs){
+    let c=1;
+    for(let k=1;k<5;k++){let a=x+dx*k,b=y+dy*k;if(valid(a,b)&&board[b][a]===p)c++;else break}
+    for(let k=1;k<5;k++){let a=x-dx*k,b=y-dy*k;if(valid(a,b)&&board[b][a]===p)c++;else break}
+    if(c>=5)return true;
+  } return false;
+}
+function move(x,y,p=turn){
+  if(gameOver||!valid(x,y)||board[y][x])return false;
+  board[y][x]=p;history.push([x,y,p]);draw();
+  if(win(x,y,p)){gameOver=true;status(p===1?'⚫ 흑돌 승리!':'⚪ 백돌 승리!');return true}
+  if(history.length===N*N){gameOver=true;status('무승부입니다!');return true}
+  turn=3-p; status(turn===1?'흑돌 차례입니다.':'백돌 차례입니다.');
+  return true;
+}
+canvas.addEventListener('click',e=>{
+  if(gameOver)return;
+  const [x,y]=pos(e);
+  if(mode==='pvp'){move(x,y);return}
+  if(turn!==1)return;
+  if(move(x,y,1)&&!gameOver)setTimeout(aiMove,180);
+});
+function scoreCell(x,y,p){
+  if(board[y][x])return -1;
+  const q=3-p;
+  let score=0;
+  const dirs=[[1,0],[0,1],[1,1],[1,-1]];
+  for(const [dx,dy] of dirs){
+    for(const who of [p,q]){
+      let len=1,open=0;
+      for(const sg of [1,-1]){
+        let k=1;
+        while(k<5){let a=x+dx*k*sg,b=y+dy*k*sg;if(!valid(a,b))break;if(board[b][a]===who){len++;k++}else{if(board[b][a]===0)open++;break}}
+      }
+      score+=(who===p?1:0)*(len*len*len*35+open*len*18);
+      if(who===q)score+=len*len*len*28+open*len*14;
+    }
+  }
+  const center=7-Math.abs(7-x)+7-Math.abs(7-y);
+  return score+center*2+Math.random()*2;
+}
+function aiMove(){
+  if(gameOver||turn!==2)return;
+  let best=[],max=-Infinity;
+  for(let y=0;y<N;y++)for(let x=0;x<N;x++)if(!board[y][x]){
+    let sc=scoreCell(x,y,2);
+    if(aiLevel===1)sc*=.75;
+    if(aiLevel===3)sc+=scoreCell(x,y,2)*.15;
+    if(sc>max){max=sc;best=[[x,y]]}else if(Math.abs(sc-max)<1e-9)best.push([x,y]);
+  }
+  if(best.length){let [x,y]=best[Math.floor(Math.random()*best.length)];move(x,y,2)}
+}
+document.getElementById('pvp').onclick=()=>{mode='pvp';document.getElementById('pvp').classList.add('active');document.getElementById('ai').classList.remove('active');document.getElementById('level').disabled=true;init()};
+document.getElementById('ai').onclick=()=>{mode='ai';document.getElementById('ai').classList.add('active');document.getElementById('pvp').classList.remove('active');document.getElementById('level').disabled=false;init()};
+document.getElementById('level').onchange=e=>aiLevel=+e.target.value;
+document.getElementById('restart').onclick=init;
+document.getElementById('undo').onclick=()=>{
+  if(!history.length||gameOver)return;
+  let n=mode==='ai'?2:1;
+  for(let i=0;i<n&&history.length;i++){let [x,y]=history.pop();board[y][x]=0}
+  turn=history.length%2?2:1; draw(); status(turn===1?'흑돌 차례입니다.':'백돌 차례입니다.');
+};
+window.addEventListener('resize',resize); init();
+</script>
+</body>
+</html>
